@@ -13,6 +13,7 @@
 #include "sensors/encoder_task.h"
 #include "processing/position_task.h"
 #include "output/uart_output.h"
+#include "calibration/command_parser.h"
 
 static const char *TAG = "MAIN";
 
@@ -44,6 +45,17 @@ void app_main(void)
         ESP_LOGI(TAG, "Calibration loaded successfully");
     }
 
+    // Initialize command parser
+    command_parser_init();
+    command_parser_set_context(&g_imu_state, &g_calibration);
+
+    ESP_LOGI(TAG, "Calibration commands available:");
+    ESP_LOGI(TAG, "  CAL_GYRO - Run gyro bias calibration");
+    ESP_LOGI(TAG, "  CAL_STATUS - Show calibration status");
+    ESP_LOGI(TAG, "  CAL_RESET - Clear calibration");
+    ESP_LOGI(TAG, "  CAL_WHEEL <angle> - Set wheel angle");
+    ESP_LOGI(TAG, "  HELP - Show all commands");
+
     // Initialize hardware drivers
     ESP_ERROR_CHECK(imu_driver_init());
     ESP_ERROR_CHECK(encoder_driver_init());
@@ -63,6 +75,7 @@ void app_main(void)
     ESP_ERROR_CHECK(uart_output_start(&g_position_state));
 
     ESP_LOGI(TAG, "=== All tasks started, system running ===");
+    ESP_LOGI(TAG, "System ready for operation");
 
     // Main loop - monitor system health
     while (1) {
