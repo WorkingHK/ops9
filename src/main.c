@@ -8,17 +8,32 @@
 #include "hal/encoder_driver.h"
 #include "sensors/imu_task.h"
 #include "sensors/encoder_task.h"
+#include "processing/position_task.h"
 
 static const char *TAG = "OPS9";
 
 // Global shared state
 static imu_state_t g_imu_state;
 static encoder_state_t g_encoder_state;
+static position_state_t g_position_state;
+static calibration_t g_calibration;
 
-// Test sensor tasks
-static void test_sensor_tasks(void)
+// Test position processing task
+static void test_position_task(void)
 {
-    ESP_LOGI(TAG, "Testing sensor tasks...");
+    ESP_LOGI(TAG, "Testing position processing task...");
+
+    // Load calibration
+    esp_err_t cal_err = nvs_manager_load_calibration(&g_calibration);
+    if (cal_err != ESP_OK) {
+        ESP_LOGW(TAG, "  No calibration found, using defaults");
+        g_calibration.valid = false;
+        for (int i = 0; i < 3; i++) {
+            g_calibration.gyro_bias[i] = 0.0f;
+            g_calibration.temp_drift_coeffs[i] = 0.0f;
+        }
+        g_calibration.wheel_angle = 0.0f;
+    }
 
     // Initialize hardware drivers
     ESP_LOGI(TAG, "  Initializing hardware drivers...");
@@ -26,42 +41,35 @@ static void test_sensor_tasks(void)
     encoder_driver_init();
 
     // Start sensor tasks
-    ESP_LOGI(TAG, "  Starting IMU task...");
+    ESP_LOGI(TAG, "  Starting sensor tasks...");
     imu_task_start(&g_imu_state);
-
-    ESP_LOGI(TAG, "  Starting encoder task...");
     encoder_task_start(&g_encoder_state, 0.1f);  // 0.1m wheel diameter
 
-    // Wait for tasks to initialize
-    vTaskDelay(pdMS_TO_TICKS(500));
+    // Wait for sensors to stabilize
+    vTaskDelay(pdMS_TO_TICKS(100));
 
-    // Monitor sensor data for 5 seconds
-    ESP_LOGI(TAG, "  Monitoring sensor data for 5 seconds...");
-    for (int i = 0; i < 10; i++) {
+    // Start processing task
+    ESP_LOGI(TAG, "  Starting position processing task...");
+    position_task_start(&g_imu_state, &g_encoder_state, &g_position_state, &g_calibration);
+
+    // Monitor position for 10 seconds
+    ESP_LOGI(TAG, "  Monitoring position for 10 seconds...");
+    for (int i = 0; i < 20; i++) {
         vTaskDelay(pdMS_TO_TICKS(500));
 
-        // Read IMU state
-        if (xSemaphoreTake(g_imu_state.mutex, pdMS_TO_TICKS(10)) == pdTRUE) {
-            ESP_LOGI(TAG, "    IMU: valid=%d, omega=[%.3f, %.3f, %.3f] rad/s, temp=%.1f°C",
-                     g_imu_state.valid,
-                     g_imu_state.omega_x,
-                     g_imu_state.omega_y,
-                     g_imu_state.omega_z,
-                     g_imu_state.temperature);
-            xSemaphoreGive(g_imu_state.mutex);
-        }
-
-        // Read encoder state
-        if (xSemaphoreTake(g_encoder_state.mutex, pdMS_TO_TICKS(10)) == pdTRUE) {
-            ESP_LOGI(TAG, "    Encoder: valid=%d, velocity=%.3f m/s, count=%lu",
-                     g_encoder_state.valid,
-                     g_encoder_state.velocity,
-                     g_encoder_state.pulse_count);
-            xSemaphoreGive(g_encoder_state.mutex);
+        // Read position state
+        if (xSemaphoreTake(g_position_state.mutex, pdMS_TO_TICKS(10)) == pdTRUE) {
+            ESP_LOGI(TAG, "    Position: x=%.3f y=%.3f heading=%.2f° conf=%.2f fail=%d",
+                     g_position_state.x,
+                     g_position_state.y,
+                     g_position_state.heading * 180.0f / 3.14159f,
+                     g_position_state.confidence,
+                     g_position_state.fail_safe_mode);
+            xSemaphoreGive(g_position_state.mutex);
         }
     }
 
-    ESP_LOGI(TAG, "Sensor tasks tested!");
+    ESP_LOGI(TAG, "Position processing task tested!");
 }
 
 void app_main(void)
@@ -70,11 +78,22 @@ void app_main(void)
 
     nvs_manager_init();
 
-    test_sensor_tasks();
+    test_position_task();
 
-    ESP_LOGI(TAG, "Stage 5: Sensor tasks verified");
+    ESP_LOGI(TAG, "Stage 6: Position processing task verified");
 
+    // Continue monitoring
     while(1) {
         vTaskDelay(pdMS_TO_TICKS(5000));
+
+        // Read and log position
+        if (xSemaphoreTake(g_position_state.mutex, pdMS_TO_TICKS(10)) == pdTRUE) {
+            ESP_LOGI(TAG, "Position: x=%.3f y=%.3f heading=%.2f° conf=%.2f",
+                     g_position_state.x,
+                     g_position_state.y,
+                     g_position_state.heading * 180.0f / 3.14159f,
+                     g_position_state.confidence);
+            xSemaphoreGive(g_position_state.mutex);
+        }
     }
 }
