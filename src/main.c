@@ -6,103 +6,73 @@
 #include "hal/nvs_manager.h"
 #include "hal/imu_driver.h"
 #include "hal/encoder_driver.h"
-#include "processing/iakf.h"
-#include "processing/attitude.h"
-#include "processing/compensation.h"
-#include "processing/coordinate.h"
-#include "processing/fusion.h"
-#include <math.h>
+#include "sensors/imu_task.h"
+#include "sensors/encoder_task.h"
 
 static const char *TAG = "OPS9";
 
-// Test algorithm modules
-static void test_algorithms(void)
+// Global shared state
+static imu_state_t g_imu_state;
+static encoder_state_t g_encoder_state;
+
+// Test sensor tasks
+static void test_sensor_tasks(void)
 {
-    ESP_LOGI(TAG, "Testing algorithm modules...");
+    ESP_LOGI(TAG, "Testing sensor tasks...");
 
-    // Test IAKF
-    ESP_LOGI(TAG, "  Testing IAKF...");
-    iakf_state_t iakf;
-    iakf_init(&iakf, 0.001f, 0.01f);
+    // Initialize hardware drivers
+    ESP_LOGI(TAG, "  Initializing hardware drivers...");
+    imu_driver_init();
+    encoder_driver_init();
 
-    float measurements[] = {0.1f, 0.15f, 0.12f, 0.11f, 0.13f};
-    for (int i = 0; i < 5; i++) {
-        float filtered = iakf_update(&iakf, measurements[i]);
-        ESP_LOGI(TAG, "    IAKF: meas=%.3f, filtered=%.3f, K=%.3f",
-                 measurements[i], filtered, iakf.K);
+    // Start sensor tasks
+    ESP_LOGI(TAG, "  Starting IMU task...");
+    imu_task_start(&g_imu_state);
+
+    ESP_LOGI(TAG, "  Starting encoder task...");
+    encoder_task_start(&g_encoder_state, 0.1f);  // 0.1m wheel diameter
+
+    // Wait for tasks to initialize
+    vTaskDelay(pdMS_TO_TICKS(500));
+
+    // Monitor sensor data for 5 seconds
+    ESP_LOGI(TAG, "  Monitoring sensor data for 5 seconds...");
+    for (int i = 0; i < 10; i++) {
+        vTaskDelay(pdMS_TO_TICKS(500));
+
+        // Read IMU state
+        if (xSemaphoreTake(g_imu_state.mutex, pdMS_TO_TICKS(10)) == pdTRUE) {
+            ESP_LOGI(TAG, "    IMU: valid=%d, omega=[%.3f, %.3f, %.3f] rad/s, temp=%.1f°C",
+                     g_imu_state.valid,
+                     g_imu_state.omega_x,
+                     g_imu_state.omega_y,
+                     g_imu_state.omega_z,
+                     g_imu_state.temperature);
+            xSemaphoreGive(g_imu_state.mutex);
+        }
+
+        // Read encoder state
+        if (xSemaphoreTake(g_encoder_state.mutex, pdMS_TO_TICKS(10)) == pdTRUE) {
+            ESP_LOGI(TAG, "    Encoder: valid=%d, velocity=%.3f m/s, count=%lu",
+                     g_encoder_state.valid,
+                     g_encoder_state.velocity,
+                     g_encoder_state.pulse_count);
+            xSemaphoreGive(g_encoder_state.mutex);
+        }
     }
-    ESP_LOGI(TAG, "  IAKF: OK");
 
-    // Test quaternion and attitude
-    ESP_LOGI(TAG, "  Testing quaternion/attitude...");
-    quaternion_t quat;
-    quaternion_init(&quat);
-    ESP_LOGI(TAG, "    Initial quat: [%.3f, %.3f, %.3f, %.3f]",
-             quat.q0, quat.q1, quat.q2, quat.q3);
-
-    // Simulate rotation around Z axis
-    float omega_z = 0.1f;  // 0.1 rad/s
-    float dt = 0.005f;     // 5ms
-    for (int i = 0; i < 100; i++) {
-        quaternion_update_rk2(&quat, 0.0f, 0.0f, omega_z, dt);
-    }
-    float heading = quaternion_to_heading(&quat);
-    ESP_LOGI(TAG, "    After 100 steps: heading=%.3f rad (%.1f deg)",
-             heading, heading * 180.0f / M_PI);
-    ESP_LOGI(TAG, "  Attitude: OK");
-
-    // Test compensation
-    ESP_LOGI(TAG, "  Testing compensation...");
-    calibration_t cal = {
-        .gyro_bias = {0.0f, 0.0f, 0.0f},
-        .temp_drift_coeffs = {0.001f, 0.0001f, 0.0f},
-        .valid = true
-    };
-
-    float omega_raw = 0.05f;
-    float temp = 25.0f;
-    float omega_comp = compensation_temperature_drift(omega_raw, temp, &cal);
-    ESP_LOGI(TAG, "    Temp compensation: raw=%.6f, comp=%.6f", omega_raw, omega_comp);
-
-    float omega_thresh = compensation_threshold(0.005f, 0.01f);
-    ESP_LOGI(TAG, "    Threshold: 0.005 -> %.6f (below threshold)", omega_thresh);
-
-    float omega_dyn = compensation_dynamic_state(0.02f, 0.5f, true);
-    ESP_LOGI(TAG, "    Dynamic state: 0.02 -> %.6f (moving)", omega_dyn);
-    ESP_LOGI(TAG, "  Compensation: OK");
-
-    // Test coordinate calculation
-    ESP_LOGI(TAG, "  Testing coordinate calculation...");
-    float dx, dy;
-    coordinate_calculate_increment(1.0f, 0.0f, 0.0f, 0.1f, &dx, &dy);
-    ESP_LOGI(TAG, "    Forward motion: dx=%.3f, dy=%.3f", dx, dy);
-
-    coordinate_calculate_increment(1.0f, M_PI/2, 0.0f, 0.1f, &dx, &dy);
-    ESP_LOGI(TAG, "    Left motion: dx=%.3f, dy=%.3f", dx, dy);
-    ESP_LOGI(TAG, "  Coordinate: OK");
-
-    // Test sensor fusion
-    ESP_LOGI(TAG, "  Testing sensor fusion...");
-    float gyro_heading = 0.1f;
-    float wheel_heading = 0.12f;
-    float fused = fusion_heading(gyro_heading, wheel_heading, 0.5f, true);
-    ESP_LOGI(TAG, "    Fusion: gyro=%.3f, wheel=%.3f, fused=%.3f",
-             gyro_heading, wheel_heading, fused);
-    ESP_LOGI(TAG, "  Fusion: OK");
-
-    ESP_LOGI(TAG, "All algorithm modules tested!");
+    ESP_LOGI(TAG, "Sensor tasks tested!");
 }
 
 void app_main(void)
 {
     ESP_LOGI(TAG, "=== OPS9 Positioning System Starting ===");
 
-    // Initialize NVS (needed for some tests)
     nvs_manager_init();
 
-    test_algorithms();
+    test_sensor_tasks();
 
-    ESP_LOGI(TAG, "Stage 4: Algorithm modules verified");
+    ESP_LOGI(TAG, "Stage 5: Sensor tasks verified");
 
     while(1) {
         vTaskDelay(pdMS_TO_TICKS(5000));
