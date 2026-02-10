@@ -14,11 +14,25 @@
 #define UART_OUTPUT_NUM UART_NUM_0
 #define UART_OUTPUT_BAUD 115200
 
-// Encoder Configuration
-#define ENCODER_PCNT_UNIT PCNT_UNIT_0
-#define ENCODER_PIN_A 25
-#define ENCODER_PIN_B 26
-#define ENCODER_PPR 2048  // AMT103 pulses per revolution
+// Encoder X Configuration (right wheel, vertical, measures X motion)
+#define ENCODER_X_PCNT_UNIT PCNT_UNIT_0
+#define ENCODER_X_PIN_A 25
+#define ENCODER_X_PIN_B 26
+#define ENCODER_X_PPR 2048  // AMT103 pulses per revolution
+
+// Encoder Y Configuration (left wheel, horizontal, measures Y motion)
+#define ENCODER_Y_PCNT_UNIT PCNT_UNIT_1
+#define ENCODER_Y_PIN_A 27
+#define ENCODER_Y_PIN_B 14
+#define ENCODER_Y_PPR 2048
+
+// Encoder geometry (rotation coupling coefficients in meters)
+#define ENCODER_X_ROTATION_COUPLING (0.07000f)   // |y_offset| = 70mm
+#define ENCODER_Y_ROTATION_COUPLING (0.08606f)   // |x_offset| = 86.06mm
+
+// Wheel parameters
+#define WHEEL_X_DIAMETER (0.100f)  // meters
+#define WHEEL_Y_DIAMETER (0.100f)  // meters
 
 // WiFi Configuration
 #define WIFI_DEBUG_ENABLED 1
