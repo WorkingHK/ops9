@@ -22,8 +22,10 @@ typedef struct {
 
 // Encoder state (updated by encoder task, read by processing task)
 typedef struct {
-    float velocity;         // m/s
-    uint32_t pulse_count;   // total pulses
+    float velocity_x;       // m/s (from X-encoder, right wheel)
+    float velocity_y;       // m/s (from Y-encoder, left wheel)
+    int32_t pulse_count_x;  // total pulses from X-encoder
+    int32_t pulse_count_y;  // total pulses from Y-encoder
     uint64_t timestamp_us;  // microseconds
     bool valid;
     SemaphoreHandle_t mutex;
