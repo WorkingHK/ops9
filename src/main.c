@@ -57,12 +57,14 @@ void app_main(void)
     ESP_LOGI(TAG, "  HELP - Show all commands");
 
     // Initialize hardware drivers
+    ESP_LOGI(TAG, "Initializing encoders...");
+    ESP_ERROR_CHECK(encoder_driver_init(ENCODER_X, ENCODER_X_PIN_A, ENCODER_X_PIN_B));
+    ESP_ERROR_CHECK(encoder_driver_init(ENCODER_Y, ENCODER_Y_PIN_A, ENCODER_Y_PIN_B));
     ESP_ERROR_CHECK(imu_driver_init());
-    ESP_ERROR_CHECK(encoder_driver_init());
 
     // Start sensor tasks
     ESP_ERROR_CHECK(imu_task_start(&g_imu_state));
-    ESP_ERROR_CHECK(encoder_task_start(&g_encoder_state, 0.1f));  // 0.1m wheel diameter
+    encoder_task_start(&g_encoder_state, WHEEL_X_DIAMETER, WHEEL_Y_DIAMETER);
 
     // Wait for sensors to stabilize
     vTaskDelay(pdMS_TO_TICKS(100));
