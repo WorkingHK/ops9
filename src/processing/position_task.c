@@ -2,7 +2,6 @@
 #include "iakf.h"
 #include "attitude.h"
 #include "compensation.h"
-#include "coordinate.h"
 #include "fusion.h"
 #include "config.h"
 #include "esp_log.h"
@@ -48,7 +47,7 @@ static void position_task_loop(void *arg)
     while (1) {
         // Copy sensor data
         float omega_x = 0.0f, omega_y = 0.0f, omega_z = 0.0f, temperature = 25.0f;
-        float velocity = 0.0f;
+        float velocity_x = 0.0f, velocity_y = 0.0f;
         bool imu_valid = false, encoder_valid = false;
         uint64_t imu_timestamp = 0, encoder_timestamp = 0;
 
@@ -65,7 +64,8 @@ static void position_task_loop(void *arg)
 
         // Read encoder state
         if (xSemaphoreTake(g_context.encoder_state->mutex, pdMS_TO_TICKS(5)) == pdTRUE) {
-            velocity = g_context.encoder_state->velocity;
+            velocity_x = g_context.encoder_state->velocity_x;
+            velocity_y = g_context.encoder_state->velocity_y;
             encoder_timestamp = g_context.encoder_state->timestamp_us;
             encoder_valid = g_context.encoder_state->valid;
             xSemaphoreGive(g_context.encoder_state->mutex);
@@ -88,7 +88,8 @@ static void position_task_loop(void *arg)
         if (encoder_timeout || !encoder_valid) {
             fail_safe = true;
             confidence = 0.3f;
-            velocity = 0.0f;
+            velocity_x = 0.0f;
+            velocity_y = 0.0f;
         }
 
         // Apply gyro bias calibration
@@ -107,24 +108,27 @@ static void position_task_loop(void *arg)
                                                              g_context.calibration);
 
         // 3. Dynamic state compensation
-        bool is_moving = fabsf(velocity) > 0.01f;
-        float omega_z_final = compensation_dynamic_state(omega_z_temp, velocity, is_moving);
+        bool is_moving = (fabsf(velocity_x) > 0.01f) || (fabsf(velocity_y) > 0.01f);
+        float velocity_magnitude = sqrtf(velocity_x * velocity_x + velocity_y * velocity_y);
+        float omega_z_final = compensation_dynamic_state(omega_z_temp, velocity_magnitude, is_moving);
 
         // 4. Attitude solving
         quaternion_update_rk2(&g_context.quaternion, omega_x, omega_y, omega_z_final, dt);
         float heading = quaternion_to_heading(&g_context.quaternion);
 
-        // 5. Coordinate calculation
-        float dx, dy;
-        float wheel_angle = g_context.calibration->valid ? g_context.calibration->wheel_angle : 0.0f;
-        coordinate_calculate_increment(velocity, heading, wheel_angle, dt, &dx, &dy);
+        // 5. Decouple rotation from encoder measurements (chassis frame)
+        float V_x_chassis = velocity_x + ENCODER_X_ROTATION_COUPLING * omega_z_final;
+        float V_y_chassis = velocity_y + ENCODER_Y_ROTATION_COUPLING * omega_z_final;
 
-        g_context.x += dx;
-        g_context.y += dy;
+        // 6. Transform chassis velocities to global frame
+        float cos_heading = cosf(heading);
+        float sin_heading = sinf(heading);
+        float V_x_global = V_x_chassis * cos_heading - V_y_chassis * sin_heading;
+        float V_y_global = V_x_chassis * sin_heading + V_y_chassis * cos_heading;
 
-        // 6. Sensor fusion (heading correction)
-        // For now, just use gyro heading
-        // TODO: Implement wheel odometry heading comparison
+        // 7. Integrate position
+        g_context.x += V_x_global * dt;
+        g_context.y += V_y_global * dt;
 
         // Update position state
         if (xSemaphoreTake(g_context.position_state->mutex, pdMS_TO_TICKS(5)) == pdTRUE) {
