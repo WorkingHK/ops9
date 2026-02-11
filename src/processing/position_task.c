@@ -42,7 +42,14 @@ static void position_task_loop(void *arg)
     const TickType_t period = pdMS_TO_TICKS(SYSTEM_UPDATE_PERIOD_MS);
     const float dt = SYSTEM_UPDATE_PERIOD_MS / 1000.0f;
 
-    ESP_LOGI(TAG, "Position task loop started (200Hz, dt=%.3fs)", dt);
+    // Ensure period is at least 1 tick to avoid assertion failure
+    if (period == 0) {
+        ESP_LOGE(TAG, "Invalid period: SYSTEM_UPDATE_PERIOD_MS=%d results in 0 ticks", SYSTEM_UPDATE_PERIOD_MS);
+        vTaskDelete(NULL);
+        return;
+    }
+
+    ESP_LOGI(TAG, "Position task loop started (200Hz, dt=%.3fs, period=%d ticks)", dt, period);
 
     while (1) {
         // Copy sensor data

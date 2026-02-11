@@ -36,7 +36,14 @@ static void uart_output_loop(void *arg)
     TickType_t last_wake_time = xTaskGetTickCount();
     const TickType_t period = pdMS_TO_TICKS(SYSTEM_UPDATE_PERIOD_MS);
 
-    ESP_LOGI(TAG, "UART output task loop started (200Hz)");
+    // Ensure period is at least 1 tick to avoid assertion failure
+    if (period == 0) {
+        ESP_LOGE(TAG, "Invalid period: SYSTEM_UPDATE_PERIOD_MS=%d results in 0 ticks", SYSTEM_UPDATE_PERIOD_MS);
+        vTaskDelete(NULL);
+        return;
+    }
+
+    ESP_LOGI(TAG, "UART output task loop started (200Hz, period=%d ticks)", period);
 
     while (1) {
         uart_packet_t packet;

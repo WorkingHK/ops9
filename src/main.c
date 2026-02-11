@@ -73,8 +73,9 @@ void app_main(void)
     ESP_ERROR_CHECK(position_task_start(&g_imu_state, &g_encoder_state,
                                         &g_position_state, &g_calibration));
 
-    // Start output task
-    ESP_ERROR_CHECK(uart_output_start(&g_position_state));
+    // Start output task (DISABLED - causes UART errors)
+    // ESP_ERROR_CHECK(uart_output_start(&g_position_state));
+    ESP_LOGI(TAG, "UART output disabled for testing");
 
     ESP_LOGI(TAG, "=== All tasks started, system running ===");
     ESP_LOGI(TAG, "System ready for operation");

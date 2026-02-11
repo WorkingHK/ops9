@@ -19,32 +19,59 @@ static void imu_task_loop(void *arg)
     TickType_t last_wake_time = xTaskGetTickCount();
     const TickType_t period = pdMS_TO_TICKS(SYSTEM_UPDATE_PERIOD_MS);
 
-    ESP_LOGI(TAG, "IMU task loop started");
+    // Ensure period is at least 1 tick to avoid assertion failure
+    if (period == 0) {
+        ESP_LOGE(TAG, "Invalid period: SYSTEM_UPDATE_PERIOD_MS=%d results in 0 ticks", SYSTEM_UPDATE_PERIOD_MS);
+        vTaskDelete(NULL);
+        return;
+    }
+
+    ESP_LOGI(TAG, "IMU task loop started (period=%d ticks)", period);
+
+    int packet_count = 0;
+    int read_count = 0;
 
     while (1) {
         // Read from UART
         int len = imu_driver_read(buffer, sizeof(buffer));
 
         if (len > 0) {
-            // Parse WIT protocol packets
-            bool parsed = imu_driver_parse_packet(buffer, len,
-                                                   &omega_x, &omega_y, &omega_z,
-                                                   &accel_x, &accel_y, &accel_z,
-                                                   &temperature);
+            read_count++;
+            if (read_count % 100 == 0) {
+                ESP_LOGI(TAG, "IMU data received: %d bytes (total reads: %d)", len, read_count);
+                // Print first 22 bytes as hex for debugging
+                ESP_LOG_BUFFER_HEX(TAG, buffer, len > 22 ? 22 : len);
+            }
 
-            if (parsed) {
-                // Update shared state
-                if (xSemaphoreTake(g_imu_state->mutex, pdMS_TO_TICKS(10)) == pdTRUE) {
-                    g_imu_state->omega_x = omega_x;
-                    g_imu_state->omega_y = omega_y;
-                    g_imu_state->omega_z = omega_z;
-                    g_imu_state->accel_x = accel_x;
-                    g_imu_state->accel_y = accel_y;
-                    g_imu_state->accel_z = accel_z;
-                    g_imu_state->temperature = temperature;
-                    g_imu_state->timestamp_us = esp_timer_get_time();
-                    g_imu_state->valid = true;
-                    xSemaphoreGive(g_imu_state->mutex);
+            // Parse all packets in buffer (WIT packets are 11 bytes each)
+            for (int i = 0; i < len - 10; i++) {
+                if (buffer[i] == 0x55) {
+                    bool parsed = imu_driver_parse_packet(&buffer[i], 11,
+                                                           &omega_x, &omega_y, &omega_z,
+                                                           &accel_x, &accel_y, &accel_z,
+                                                           &temperature);
+
+                    if (parsed) {
+                        packet_count++;
+                        if (packet_count % 100 == 0) {
+                            ESP_LOGI(TAG, "IMU parsed: omega_z=%.3f rad/s (packets: %d)", omega_z, packet_count);
+                        }
+
+                        // Update shared state
+                        if (xSemaphoreTake(g_imu_state->mutex, pdMS_TO_TICKS(10)) == pdTRUE) {
+                            g_imu_state->omega_x = omega_x;
+                            g_imu_state->omega_y = omega_y;
+                            g_imu_state->omega_z = omega_z;
+                            g_imu_state->accel_x = accel_x;
+                            g_imu_state->accel_y = accel_y;
+                            g_imu_state->accel_z = accel_z;
+                            g_imu_state->temperature = temperature;
+                            g_imu_state->timestamp_us = esp_timer_get_time();
+                            g_imu_state->valid = true;
+                            xSemaphoreGive(g_imu_state->mutex);
+                        }
+                    }
+                    i += 10;  // Skip to next potential packet
                 }
             }
         }

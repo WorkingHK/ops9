@@ -51,7 +51,7 @@ bool imu_driver_parse_packet(const uint8_t *data, size_t len,
 
         *omega_x = wx / 32768.0f * 2000.0f * 3.14159f / 180.0f;  // Convert to rad/s
         *omega_y = wy / 32768.0f * 2000.0f * 3.14159f / 180.0f;
-        *omega_z = wz / 32768.0f * 2000.0f * 3.14159f / 180.0f;
+        *omega_z = -(wz / 32768.0f * 2000.0f * 3.14159f / 180.0f);  // Inverted for correct direction
         return true;
     }
 

@@ -25,7 +25,14 @@ static void encoder_task_loop(void *arg)
     TickType_t last_wake_time = xTaskGetTickCount();
     const TickType_t period = pdMS_TO_TICKS(SYSTEM_UPDATE_PERIOD_MS);
 
-    ESP_LOGI(TAG, "Encoder task loop started (dual X/Y)");
+    // Ensure period is at least 1 tick to avoid assertion failure
+    if (period == 0) {
+        ESP_LOGE(TAG, "Invalid period: SYSTEM_UPDATE_PERIOD_MS=%d results in 0 ticks", SYSTEM_UPDATE_PERIOD_MS);
+        vTaskDelete(NULL);
+        return;
+    }
+
+    ESP_LOGI(TAG, "Encoder task loop started (dual X/Y, period=%d ticks)", period);
 
     while (1) {
         int32_t current_count_x = encoder_driver_get_count(ENCODER_X);
